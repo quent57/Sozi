@@ -110,13 +110,21 @@ class SoziField:
         """
         self.write_if_needed()
         self.current_frame = frame
+        self.last_value = self.get_value_from_frame(frame, self.default_value)
+        self.set_value(self.last_value)
+
+    
+    def get_value_from_frame(self, frame, default_value):
+        """
+        Return the value read in frame
+        """
         if frame is not None and self.ns_attr in frame["frame_element"].attrib:
             self.last_value = frame["frame_element"].attrib[self.ns_attr]
         else:
             self.last_value = self.default_value
-        self.set_value(self.last_value)
-
-
+        return self.last_value
+    
+    
     def on_focus_out(self, widget, event=None):
         """
         Event handler, called each time the current field loses focus.
@@ -223,7 +231,7 @@ class SoziSpinButtonField(SoziField):
         # def set_increments(step, page)
         # step :    increment applied for each left mousebutton press.
         # page :     increment applied for each middle mousebutton press.
-        self.input_widget.set_increments(increments, increments * 2)
+        self.input_widget.set_increments(increments, increments * 10)
         self.input_widget.set_numeric(True)
         self.container_widget.pack_start(gtk.Label(label))
         self.container_widget.pack_start(self.input_widget)
@@ -437,17 +445,19 @@ class SoziDuplicateAction(SoziAction):
         Initialize a new frame creation action.
             - ui: an instance of SoziUI
         """
+        
+        # The new frame is a copy of the currently selected frame
+        self.index = ui.get_selected_index()
+        
         # The new frame will be added at the end of the presentation
         new_frame_number = str(len(ui.effect.frames) + 1)
 
         SoziAction.__init__(self,
-            "Remove frame " + new_frame_number,
-            "Recreate frame " + new_frame_number)
+            "Duplicate frame " + self.index + " to " + new_frame_number,
+            "Delete frame " + new_frame_number)
         
         self.ui = ui
         
-        # The new frame is a copy of the currently selected frame
-        self.index = ui.get_selected_index()
         self.frame = ui.effect.create_new_frame(self.index)
         for field in ui.fields.itervalues():
             self.frame["frame_element"].set(field.ns_attr, field.get_value())
@@ -556,6 +566,10 @@ class SoziUI:
                 "accelerate-decelerate", "strong-accelerate-decelerate",
                 "decelerate-accelerate", "strong-decelerate-accelerate"]
 
+    
+    PAGE_NUMBER_POSITIONS = ["top-left", "top-right",
+                "bottom-left", "bottom-right"]
+
 
     def __init__(self, effect):
         """
@@ -582,11 +596,13 @@ class SoziUI:
             "title": SoziTextField(self, "title", "Title", "New frame"),
             "hide": SoziCheckButtonField(self, "hide", "Hide", "true"),
             "clip": SoziCheckButtonField(self, "clip", "Clip", "true"),
-            "timeout-enable": SoziCheckButtonField(self, "timeout-enable", "Timeout enable", "false"),
-            "timeout-ms": SoziSpinButtonField(self, "timeout-ms", "Timeout (s)", 0, 3600, 5, factor=1000, digits=2, increments=0.2),
+            "timeout-enable": SoziCheckButtonField(self, "timeout-enable", "Timeout (s)", "false"),
+            "timeout-ms": SoziSpinButtonField(self, "timeout-ms", "", 0, 3600, 5, factor=1000, digits=2, increments=0.1),
             "transition-duration-ms": SoziSpinButtonField(self, "transition-duration-ms", "Duration (s)", 0, 3600, 1, factor=1000, digits=2, increments=0.1),
             "transition-zoom-percent": SoziSpinButtonField(self, "transition-zoom-percent", "Zoom (%)", -100, 100, 0, increments=5),
-            "transition-profile": SoziComboField(self, "transition-profile", "Profile", SoziUI.PROFILES, SoziUI.PROFILES[0])
+            "transition-profile": SoziComboField(self, "transition-profile", "Profile", SoziUI.PROFILES, SoziUI.PROFILES[0]),
+            "frame-number-enable": SoziCheckButtonField(self, "frame-number-enable", "Page number", "true"),
+            "frame-number-location": SoziComboField(self, "frame-number-location", "", SoziUI.PAGE_NUMBER_POSITIONS, SoziUI.PAGE_NUMBER_POSITIONS[0])
         }
 
 
@@ -611,12 +627,14 @@ class SoziUI:
         frame_box.pack_start(self.fields["title"].container_widget, expand=False)
         frame_box.pack_start(self.fields["hide"].container_widget, expand=False)
         frame_box.pack_start(self.fields["clip"].container_widget, expand=False)
-        frame_box.pack_start(self.fields["timeout-enable"].container_widget, expand=False)
-        frame_box.pack_start(self.fields["timeout-ms"].container_widget, expand=False)
+        frame_box_horiz = gtk.HBox(spacing=10)
+        frame_box_horiz.pack_start(self.fields["timeout-enable"].container_widget, expand=False)
+        frame_box_horiz.pack_start(self.fields["timeout-ms"].container_widget, expand=False)
+        frame_box.pack_start(frame_box_horiz)
 
         frame_group = gtk.Frame()
         # fixme, spaces are here for set width of list..
-        frame_label=gtk.Label("<b>Frame properties</b>              ")
+        frame_label = gtk.Label("<b>Frame properties</b>              ")
         frame_label.set_use_markup(True) # enable bold with <b>
         frame_group.set_label_widget(frame_label)
         frame_group.add(frame_box)
@@ -628,7 +646,7 @@ class SoziUI:
         transition_box.pack_start(self.fields["transition-profile"].container_widget, expand=False)
 
         transition_group = gtk.Frame("Transition")
-        transition_label=gtk.Label("<b>Transition</b>              ")
+        transition_label = gtk.Label("<b>Transition</b>              ")
         transition_label.set_use_markup(True) # enable bold with <b>
         transition_group.set_label_widget(transition_label)
         transition_group.add(transition_box)
@@ -642,20 +660,26 @@ class SoziUI:
         # Create frame list
         list_renderer = gtk.CellRendererText()
         list_renderer.set_property("background", "white")
-        sequence_column = gtk.TreeViewColumn("Seq.", list_renderer, text=0, foreground=2)
-        title_column = gtk.TreeViewColumn("Title", list_renderer, text=1, foreground=2)
+        sequence_column = gtk.TreeViewColumn("Seq.", list_renderer, text=0, foreground=5)
+        title_column = gtk.TreeViewColumn("Title", list_renderer, text=1, foreground=5)
+        hide = gtk.TreeViewColumn("H", list_renderer, text=2, foreground=5)
+        clip = gtk.TreeViewColumn("C", list_renderer, text=3, foreground=5)
+        timeout = gtk.TreeViewColumn("T", list_renderer, text=4, foreground=5)
 
-        store = gtk.ListStore(int, str, str)
+        store = gtk.ListStore(int, str, str, str, str, str)
         self.list_view = gtk.TreeView(store)
         self.list_view.append_column(sequence_column)
         self.list_view.append_column(title_column)
+        self.list_view.append_column(hide)
+        self.list_view.append_column(clip)
+        self.list_view.append_column(timeout)
 
         list_scroll = gtk.ScrolledWindow()
         list_scroll.set_policy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)	
         list_scroll.add(self.list_view)
 
         selection = self.list_view.get_selection()
-        selection.set_mode(gtk.SELECTION_SINGLE) # TODO multiple selection
+        selection.set_mode(gtk.SELECTION_MULTIPLE) # TODO multiple selection
         selection.set_select_function(self.on_selection_changed)
 
         # Create new/delete buttons
@@ -700,7 +724,7 @@ class SoziUI:
 
         list_group = gtk.Frame()
         # fixme, spaces are here for set width of list..
-        list_frame_label=gtk.Label("<b>Frame list</b>              ")
+        list_frame_label = gtk.Label("<b>Frame list</b>              ")
         list_frame_label.set_use_markup(True) # enable bold with <b>
         list_group.set_label_widget(list_frame_label)
         list_group.add(left_pane_content)
@@ -729,11 +753,31 @@ class SoziUI:
         statusBar = gtk.Statusbar()
         #statusBar.push(statusBar.getContexteId("a"),"Etat initial")
         
+        
+        
+        
+        hboxGP = gtk.HBox(spacing=5)
+        hboxGP.add(self.fields["frame-number-enable"].container_widget)
+        hboxGP.add(self.fields["frame-number-location"].container_widget)
+        
+        vboxGP = gtk.VBox(spacing=5)
+        vboxGP.pack_start(hboxGP)
+
+        notebook1 = gtk.Notebook()
+        notebook1.set_name("Frames properties")
+        notebook1.add(hbox)
+        notebook1.add(vboxGP)
+        
         vbox = gtk.VBox(spacing=5)
         vbox.pack_start(toolBar)
-        vbox.add(hbox)
+        vbox.add(notebook1)
         vbox.add(buttonBar)
         vbox.pack_end(statusBar)
+        
+        
+
+        
+        
         
         self.window.add(vbox)
         self.window.show_all()
@@ -768,7 +812,7 @@ class SoziUI:
         else:
             self.fill_form(None)
         
-        if self.select_is_new==False:
+        if self.select_is_new == False:
             self.new_button.set_sensitive(False)
         
         gtk.main()
@@ -789,20 +833,29 @@ class SoziUI:
         frame = self.effect.frames[index]
 
         # Get the title of the frame
-        title_attr = inkex.addNS("title", "sozi")
-        if title_attr in frame["frame_element"].attrib:
-            title = frame["frame_element"].attrib[title_attr]
-        else:
-            title = "Untitled"
-
-        # The text color will show whether the current frame
-        # corresponds to the selected object in Inkscape
+        title = self.fields["title"].get_value_from_frame(frame, "Untitled")
+        
+        # Get the hide State of the frame
+        hide = self.fields["hide"].get_value_from_frame(frame, False)
+        hide = self.get_bool_for_print(hide)
+        # Get the hide State of the frame
+        clip = self.fields["clip"].get_value_from_frame(frame, False)
+        clip = self.get_bool_for_print(clip)
+        
+        timeout_enable = self.fields["timeout-enable"].get_value_from_frame(frame, False)
+        timeout_enable = timeout_enable == "true"
+        
+        timeout_ms = ""
+        if timeout_enable:
+            timeout_ms = float(self.fields["timeout-ms"].get_value_from_frame(frame, False)) / 1000.
+            
+        
         if frame["svg_element"] in self.effect.selected.values():
             color = "#ff0000"
         else:
             color = "#000000"
 
-        self.list_view.get_model().append([index + 1, title, color])
+        self.list_view.get_model().append([index + 1, title, hide, clip, timeout_ms, color])
 
 
     def insert_row(self, index, row):
@@ -853,7 +906,7 @@ class SoziUI:
         for field in self.fields.itervalues():
             field.set_with_frame(frame)
 
-        self.duplicate_button.set_sensitive(frame is not None )
+        self.duplicate_button.set_sensitive(frame is not None)
         
         self.delete_button.set_sensitive(frame is not None)
 
@@ -943,6 +996,17 @@ class SoziUI:
             self.up_button.set_sensitive(index > 0)
             self.down_button.set_sensitive(index < len(self.effect.frames) - 1)
             self.delete_button.set_sensitive(True)
+            
+            print "------"
+            print "x:" + self.effect.frames[index]["svg_element"].get("x")
+            print "y:" + self.effect.frames[index]["svg_element"].get("y")
+            print "height:" + self.effect.frames[index]["svg_element"].get("height")
+            print "width:" + self.effect.frames[index]["svg_element"].get("width")
+            
+            
+        
+        
+        #self.get_value_from_frame(frame, self.default_value)
         
         # Show the properties of the selected frame,
         # or default values if no frame is selected.
@@ -1013,6 +1077,31 @@ class SoziUI:
             index = self.effect.frames.index(action.frame)
             model = self.list_view.get_model()
             model.set(model.get_iter(index), 1, action.frame["frame_element"].get(action.field.ns_attr))
+            
+        # Update the frame list view if the "hide" field of a frame has changed.
+        if isinstance(action, SoziFieldAction) and action.field is self.fields["hide"]:
+            index = self.effect.frames.index(action.frame)
+            model = self.list_view.get_model()
+            model.set(model.get_iter(index), 2, self.get_bool_for_print(action.frame["frame_element"].get(action.field.ns_attr)))
+        
+        # Update the frame list view if the "clip" field of a frame has changed.
+        if isinstance(action, SoziFieldAction) and action.field is self.fields["clip"]:
+            index = self.effect.frames.index(action.frame)
+            model = self.list_view.get_model()
+            model.set(model.get_iter(index), 3, self.get_bool_for_print(action.frame["frame_element"].get(action.field.ns_attr)))
+        
+        # Update the frame list view if the "timeout" field of a frame has changed.
+        if isinstance(action, SoziFieldAction) and (action.field is self.fields["timeout-enable"] or action.field is self.fields["timeout-ms"])  :
+            index = self.effect.frames.index(action.frame)
+            model = self.list_view.get_model()
+            timeout_enable = self.fields["timeout-enable"].get_value()
+            timeout_enable = timeout_enable == "true"
+        
+            timeout_ms = ""
+            if timeout_enable:
+                timeout_ms = float(self.fields["timeout-ms"].get_value()) / 1000.
+            model.set(model.get_iter(index), 4, timeout_ms)
+        
         
         # Update the status of the "Undo" button 
         if self.undo_stack:
@@ -1028,6 +1117,12 @@ class SoziUI:
             self.redo_button.set_tooltip_text("")
         self.redo_button.set_sensitive(bool(self.redo_stack))
 
+   
+    def get_bool_for_print(self, val):
+        if val == "true":
+            return "x"
+        else:
+            return ""
    
     def on_destroy(self, widget):
         """
@@ -1049,7 +1144,7 @@ class Sozi(inkex.Effect):
 
 
     def effect(self):
-        sozi_upgrade.upgrade_or_install(self)
+        #sozi_upgrade.upgrade_or_install(self)
         self.analyze_document()
         self.ui = SoziUI(self)
 
@@ -1108,8 +1203,8 @@ class Sozi(inkex.Effect):
             
         frame_element = inkex.etree.Element(inkex.addNS("frame", "sozi"))
         frame_element.set(inkex.addNS("refid", "sozi"), svg_element.attrib["id"]) # TODO check namespace?
-        frame_element.set(inkex.addNS("sequence", "sozi"), unicode(len(self.frames)+1))
-        frame_element.set("id", self.uniqueId("frame" + unicode(len(self.frames)+1)))
+        frame_element.set(inkex.addNS("sequence", "sozi"), unicode(len(self.frames) + 1))
+        frame_element.set("id", self.uniqueId("frame" + unicode(len(self.frames) + 1)))
         
         frame = {
             "frame_element": frame_element,
