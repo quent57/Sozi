@@ -27,9 +27,21 @@ import inkex
 import pygtk
 pygtk.require("2.0")
 import gtk
+import os
+import subprocess
 
-import sozi_upgrade
-
+#source http://code.activestate.com/recipes/121574-matrix-vector-multiplication/
+def matmult(m, v):
+    rows = len(m)
+    w = [0]*rows
+    irange = range(len(v))
+    sum = 0
+    for j in range(rows):
+        r = m[j]
+        for i in irange:
+            sum += r[i]*v[i]
+        w[j],sum = sum,0
+    return w
 
 class SoziField:
     """
@@ -679,7 +691,7 @@ class SoziUI:
         list_scroll.add(self.list_view)
 
         selection = self.list_view.get_selection()
-        selection.set_mode(gtk.SELECTION_MULTIPLE) # TODO multiple selection
+        selection.set_mode(gtk.SELECTION_SINGLE) # TODO multiple selection #gtk.SELECTION_MULTIPLE
         selection.set_select_function(self.on_selection_changed)
 
         # Create new/delete buttons
@@ -736,6 +748,8 @@ class SoziUI:
         hbox.pack_start(left_pane)
         hbox.pack_start(right_pane)
         
+        self.image = gtk.Image()
+        hbox.pack_start(self.image)
         
         # button Bar
         cancel_button = gtk.Button(stock=gtk.STOCK_CANCEL)
@@ -763,6 +777,7 @@ class SoziUI:
         vboxGP = gtk.VBox(spacing=5)
         vboxGP.pack_start(hboxGP)
 
+
         notebook1 = gtk.Notebook()
         notebook1.set_name("Frames properties")
         notebook1.add(hbox)
@@ -774,8 +789,6 @@ class SoziUI:
         vbox.add(buttonBar)
         vbox.pack_end(statusBar)
         
-        
-
         
         
         
@@ -818,6 +831,10 @@ class SoziUI:
         gtk.main()
         
 
+    def update(self, index):
+        
+        self.image.set_from_file("/tmp/sozi_temp.png")
+        
     def append_frame_title(self, index):
         """
         Append the title of the frame at the given index to the frame list view.
@@ -997,14 +1014,42 @@ class SoziUI:
             self.down_button.set_sensitive(index < len(self.effect.frames) - 1)
             self.delete_button.set_sensitive(True)
             
-            print "------"
-            print "x:" + self.effect.frames[index]["svg_element"].get("x")
-            print "y:" + self.effect.frames[index]["svg_element"].get("y")
-            print "height:" + self.effect.frames[index]["svg_element"].get("height")
-            print "width:" + self.effect.frames[index]["svg_element"].get("width")
+            documentHeight =  self.effect.xpathSingle('//@height')
             
+            #print "<!-- ----"
+            x = self.effect.frames[index]["svg_element"].get("x")
+            yo = self.effect.frames[index]["svg_element"].get("y")
+            height = self.effect.frames[index]["svg_element"].get("height")
+            width = self.effect.frames[index]["svg_element"].get("width")
+           
+            y = str(float(inkex.unittouu(documentHeight)) - float(yo) - float(height))
+            x2 = str(float(x) + float(width))
+            y2 = str(float(3.54 * 297 - float(yo)))
+            #svg matrix : see http://www.w3.org/TR/SVG/coords.html#TransformMatrixDefined
+            transform = self.effect.frames[index]["svg_element"].get("transform")
+
+#            if transform is not None:
+#                print "transfom:" + transform
+#                import re
+#                p = re.compile('matrix\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)', re.IGNORECASE)
+#                m = p.match(transform)
+#                for i in range(1,6):
+#                    print str(i) + str(m.group(i))
+#                mat = [[],[],[]]
             
-        
+         
+            
+            fnull = open(os.devnull, 'w')
+
+            subprocess.call(["inkscape" ,
+                             "--export-area=" + x.replace('.', ',') + ":" + y.replace('.', ',') + ":" + x2.replace('.', ',') + ":" + y2.replace('.', ','),
+                             "--export-png=/tmp/sozi_temp.png",
+                             "-w200",
+                             #"-h200",
+                             sys.argv[1:][-1] ], 
+                             stdout = fnull, stderr = fnull)#subprocess.DEVNULL
+            self.update(index)
+            
         
         #self.get_value_from_frame(frame, self.default_value)
         
@@ -1015,6 +1060,7 @@ class SoziUI:
         # Success: highlight or clear the affected row in the frame list
         return True
 
+    
 
     def on_key_press(self, widget, event):
         if event.state & gtk.gdk.CONTROL_MASK:
