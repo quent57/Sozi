@@ -453,7 +453,7 @@ class SoziDuplicateAction(SoziAction):
         new_frame_number = str(len(ui.effect.frames) + 1)
 
         SoziAction.__init__(self,
-            "Duplicate frame " + self.index + " to " + new_frame_number,
+            "Duplicate frame " + str(self.index) + " to " + str(new_frame_number),
             "Delete frame " + new_frame_number)
         
         self.ui = ui
@@ -679,7 +679,7 @@ class SoziUI:
         list_scroll.add(self.list_view)
 
         selection = self.list_view.get_selection()
-        selection.set_mode(gtk.SELECTION_MULTIPLE) # TODO multiple selection
+        selection.set_mode(gtk.SELECTION_SINGLE) # TODO multiple selection
         selection.set_select_function(self.on_selection_changed)
 
         # Create new/delete buttons
@@ -997,12 +997,7 @@ class SoziUI:
             self.down_button.set_sensitive(index < len(self.effect.frames) - 1)
             self.delete_button.set_sensitive(True)
             
-            print "------"
-            print "x:" + self.effect.frames[index]["svg_element"].get("x")
-            print "y:" + self.effect.frames[index]["svg_element"].get("y")
-            print "height:" + self.effect.frames[index]["svg_element"].get("height")
-            print "width:" + self.effect.frames[index]["svg_element"].get("width")
-            
+         
             
         
         
@@ -1144,7 +1139,7 @@ class Sozi(inkex.Effect):
 
 
     def effect(self):
-        #sozi_upgrade.upgrade_or_install(self)
+        sozi_upgrade.upgrade_or_install(self)
         self.analyze_document()
         self.ui = SoziUI(self)
 
